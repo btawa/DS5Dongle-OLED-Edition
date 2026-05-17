@@ -8,16 +8,20 @@
 #include <cstdio>
 #include <cstring>
 
+#include "audio.h"
 #include "bt.h"
 #include "config.h"
 #include "device/usbd.h"
 #include "pico/time.h"
+#include "slots.h"
 
 bool is_pico_cmd(uint8_t report_id) {
     if (report_id == 0xf6 ||
         report_id == 0xf7 ||
         report_id == 0xf8 ||
-        report_id == 0xf9
+        report_id == 0xf9 ||
+        report_id == 0xfa ||
+        report_id == 0xfb
     ) {
         return true;
     }
@@ -52,6 +56,42 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
         printf("[HID] 0xf9 RSSI=%d raw=0x%02X\n", rssi, buffer[0]);
 #endif
         return 1;
+    }
+    if (report_id == 0xfa) {
+        // OLED Edition: 4 x bd_addr (6 bytes each) + 4 x occupied flag = 28 bytes.
+        constexpr uint16_t want = 28;
+        if (reqlen < want) {
+            printf("[HID] 0xfa reqlen=%u too small for slots payload (%u)\n", reqlen, want);
+            return 0;
+        }
+        for (int i = 0; i < 4; i++) {
+            uint8_t addr[6];
+            bt_slot_get_addr(i, addr);
+            memcpy(buffer + i * 6, addr, 6);
+        }
+        for (int i = 0; i < 4; i++) {
+            buffer[24 + i] = bt_slot_occupied(i) ? 1 : 0;
+        }
+        return want;
+    }
+    if (report_id == 0xfb) {
+        // OLED Edition: diagnostics + audio meters for the web emulator.
+        constexpr uint16_t want = 18;
+        if (reqlen < want) {
+            printf("[HID] 0xfb reqlen=%u too small for diag payload (%u)\n", reqlen, want);
+            return 0;
+        }
+        const uint32_t uptime_s   = time_us_32() / 1000000u;
+        const uint32_t usb_frames = audio_usb_frames();
+        const uint32_t bt_packets = audio_bt_packets();
+        const uint32_t hci_errs   = bt_hci_err_count();
+        memcpy(buffer + 0,  &uptime_s,   4);
+        memcpy(buffer + 4,  &usb_frames, 4);
+        memcpy(buffer + 8,  &bt_packets, 4);
+        buffer[12] = audio_peak_speaker();
+        buffer[13] = audio_peak_haptic();
+        memcpy(buffer + 14, &hci_errs,   4);
+        return want;
     }
     return 0;
 }
