@@ -67,11 +67,12 @@ static bool audio10_set_req_entity(tusb_control_request_t const *p_request, uint
                         TU_VERIFY(p_request->wLength == 2);
 
                         volume[index] = static_cast<float>(*reinterpret_cast<int16_t const *>(pBuff)) / 256;
-                        if (entityID == UAC1_ENTITY_SPK_FEATURE_UNIT) {
-                            auto config = get_config();
-                            config.speaker_volume = volume[index];
-                            set_config(config);
-                        }
+                        // Do NOT sync the USB-side UAC1 volume control into our
+                        // flash-persisted config. The host (PipeWire/Pulse) re-applies
+                        // its last-known UAC1 volume on every device reconnect, which
+                        // would silently override the user's saved speaker_volume.
+                        // Fix borrowed from loteran/DS5Dongle commit 03fa1e4.
+                        (void)entityID;
 
                         TU_LOG2("    Set Volume: %d dB of entity: %u\r\n", volume[index], entityID);
                         return true;

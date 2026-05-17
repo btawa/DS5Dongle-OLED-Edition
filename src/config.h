@@ -17,6 +17,12 @@ struct __attribute__((packed)) Config_body {
     uint8_t polling_rate_mode; // 0: 250Hz, 1: 500Hz, 2: real-time
     uint8_t audio_buffer_length; // [16,128]
     uint8_t controller_mode; // 0: DS5, 1: DSE, 2: Auto
+    uint8_t current_slot;    // [0..3] active multi-pairing slot (OLED Edition Phase G)
+    // Audio Auto Haptics — derive haptic feedback from speaker audio for games that
+    // send no per-frame native haptic data. DSP borrowed from loteran/DS5Dongle 5d6bc2f.
+    uint8_t auto_haptics_enable;  // 0=Off, 1=Fallback (default), 2=Mix, 3=Replace
+    uint8_t auto_haptics_gain;    // [0,200] percent, default 100
+    uint8_t auto_haptics_lowpass; // 0=80Hz, 1=160Hz (default), 2=250Hz, 3=400Hz
 };
 
 struct __attribute__((packed)) Config {

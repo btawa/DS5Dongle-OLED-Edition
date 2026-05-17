@@ -88,6 +88,8 @@ add_executable(ds5-bridge
         src/config.cpp
         src/cmd.cpp
         src/state_mgr.cpp
+        src/oled.cpp
+        src/slots.cpp
 )
 
 if (ENABLE_BATT_LED)
@@ -144,7 +146,8 @@ if(WAKE_DEBUG)
 endif()
 set(VERSION "dev" CACHE STRING "Program version string")
 
-pico_set_program_name(ds5-bridge "ds5-bridge")
+set_target_properties(ds5-bridge PROPERTIES OUTPUT_NAME "ds5-bridge-oled")
+pico_set_program_name(ds5-bridge "ds5-bridge-oled")
 pico_set_program_version(ds5-bridge "${VERSION}")
 
 # Modify the below lines to enable/disable output over UART/USB
@@ -167,6 +170,7 @@ target_link_libraries(ds5-bridge
         hardware_watchdog
         hardware_timer
         hardware_flash
+        hardware_spi
         pico_btstack_classic
 #        pico_cyw43_arch_threadsafe_background
         pico_cyw43_arch_poll

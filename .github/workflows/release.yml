@@ -91,7 +91,7 @@ jobs:
             -DVERSION="$FIRMWARE_VERSION"
           cmake --build build/standard --target ds5-bridge
           mkdir -p artifacts
-          cp build/standard/ds5-bridge.uf2 "artifacts/ds5-bridge-${{ github.event.release.tag_name }}.uf2"
+          cp build/standard/ds5-bridge-oled.uf2 "artifacts/ds5-bridge-oled-${{ github.event.release.tag_name }}.uf2"
 
       - name: Build Debug firmware
         run: |
@@ -102,7 +102,7 @@ jobs:
             -DENABLE_VERBOSE=ON \
             -DVERSION="$FIRMWARE_VERSION"
           cmake --build build/debug --target ds5-bridge
-          cp build/debug/ds5-bridge.uf2 "artifacts/ds5-bridge-debug-${{ github.event.release.tag_name }}.uf2"
+          cp build/debug/ds5-bridge-oled.uf2 "artifacts/ds5-bridge-oled-debug-${{ github.event.release.tag_name }}.uf2"
 
       - name: Upload UF2 files to release
         env:

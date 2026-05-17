@@ -1,0 +1,110 @@
+# Changelog
+
+All notable changes to **Pico2W DualSense 5 Bridge — OLED Edition** are documented here. This fork tracks [awalol/DS5Dongle](https://github.com/awalol/DS5Dongle) (upstream) and adds an optional OLED status display plus a security/correctness audit pass on the core bridge.
+
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning approximates [SemVer](https://semver.org/) with the upstream version stream — the fork shares a major.minor with whatever upstream tag it is rebased on.
+
+---
+
+## [Unreleased]
+
+### Fixed
+
+- **DualSense speaker + HD haptic actuator regression** — upstream commit `3a31bd7` (2026-05-12, "refactor: add SetStateData and audio send priority") moved the `0x10` SetStateData sub-report out of every `0x36` audio packet and into a one-time L2CAP-open setup. The DS5 hardware requires that sub-report to be re-asserted on every audio frame (the `0x7f 0x7f` Headphones+Speaker volume bytes specifically) or the speaker and HD haptic actuators silently stop producing output. Restored in `src/audio.cpp` with the pre-3a31bd7 packet layout (state_data at `pkt[11..75]`, haptic at `pkt[76..141]`, speaker at `pkt[142..343]`). Same fix shipped independently by loteran/DS5Dongle as commit `c7a8d3c` ~6 h before ours; credit to loteran for the clearer hardware-side explanation in their commit message.
+- **USB UAC1 SET_CUR Volume request no longer overrides flash-persisted speaker_volume.** PipeWire / PulseAudio re-apply their last-known UAC1 volume on every device reconnect, which had silently overridden whatever the user had saved in the OLED Settings menu. The in-memory `volume[]` array still tracks live host volume; only the flash sync was removed. Fix borrowed from loteran/DS5Dongle commit `03fa1e4`.
+
+### Added
+
+- **Audio Auto Haptics** — derive haptic feedback from the speaker audio (UAC channels 0/1) for games that send sound but no per-frame haptic data, e.g. Ghost of Tsushima on Linux + Steam. DSP is a 1-pole low-pass + envelope follower + modulation + soft-clip (`x / (1 + |x|)`, avoids `tanhf` on Cortex-M33), borrowed from loteran/DS5Dongle commit `5d6bc2f`. Four modes selectable from the OLED Settings menu: **Off** / **Fallback** / **Mix** / **Replace**. Default is **Fallback** — derived rumble fires only after the game has been silent on the native haptic path (channels 2/3) for ~1 s, so games that send native HD haptics (Spider-Man Remastered) are not overridden, while games that don't (Ghost of Tsushima) get derived haptics out of the box. Gain (0–200 %) and LP cutoff (80 / 160 / 250 / 400 Hz) are also tunable from the Settings menu.
+- **Audio Diagnostics counters** on the OLED Diagnostics screen: `USB aud N/s` (UAC1 frames per second arriving from the host) and `BT 0x32 N/s` (audio packets emitted to the DS5 per second). Lets the user verify the speaker/haptic path is actually moving bytes without needing a UART cable. Used to triage the speaker regression above.
+
+---
+
+## [0.5.4] — 2026-05-16
+
+First full OLED Edition release. Includes upstream's v0.5.4 base plus the audit pass and the entire OLED add-on feature set.
+
+### Added — OLED display add-on
+
+Requires a Waveshare [Pico-OLED-1.3](https://www.waveshare.com/wiki/Pico-OLED-1.3) (128×64 SH1107). Firmware drives it automatically when present and no-ops gracefully when absent.
+
+- **Boot splash** (1.5 s) showing firmware version on power-on.
+- **10 screens**, cycled with KEY0 (forward) / KEY1 (back, except where contextual):
+  1. **Status** — connection state, paired BD address, battery % with pixel-icon battery, live stick / D-pad / face-button / L1-R1 / L2-R2 trigger visualization.
+  2. **Slots** — persistent 4-slot multi-controller pairing (see below).
+  3. **Lightbar Color Picker** — tilt-to-RGB live preview on the controller's lightbar, with 4 user-savable favorite slots (△ ○ ✕ □) and three effect presets (Breathing, Rainbow, Fade).
+  4. **Trigger Test** — cycles 7 DS5 adaptive trigger effects (Off / Feedback / Weapon / Vibration / Bow / Galloping / Machine Gun) on both L2 and R2, bitpacked per [dualsensectl](https://github.com/nowrep/dualsensectl)'s reverse-engineering.
+  5. **Gyro Tilt** — live X/Y/Z accelerometer values + 40×40 crosshair box that tracks tilt in real time.
+  6. **Touchpad** — live render of finger positions on the touchpad surface, with a finger count.
+  7. **Diagnostics** — uptime, BT state, HCI / audio-FIFO / opus-FIFO counter stubs (kept for future wiring).
+  8. **RSSI** — live BT signal strength of the active link, dBm + bar.
+  9. **VU Meters** — live peak meters for the speaker + haptic audio paths.
+  10. **Settings** — persistent on-device editor for the 8 firmware config fields, plus "Reset to defaults" (hold △ 2 s) and "Wipe all slots" (hold △ 2 s).
+- **OLED brightness control** — KEY1 long-press cycles brightness levels.
+- **Auto-dim** after 5 minutes of input idle (lifespan / burn-in protection).
+- **Soft-reboot recovery** without unplugging USB:
+  - OLED KEY0 **double-click** (~400 ms window) → `watchdog_reboot`.
+  - DS5 `PS + Mute` held for 2 seconds → `watchdog_reboot` (works without the OLED).
+- **Pixel-art icons** in the Status screen header (link indicator + battery icon).
+
+### Added — 4-slot persistent multi-controller pairing
+
+- Bond up to 4 DualSenses; switch between them from the **Slots** OLED screen.
+- Active slot persisted in the existing flash-backed config; dongle reconnects to the last-used controller on boot.
+- D-pad ▲▼ to move cursor, △ to switch to the cursor slot (disconnect current ACL, restart inquiry filtered to the new slot's bd_addr), □ hold 1.5 s to wipe a single slot.
+- "Wipe all slots" item in the Settings menu drops all 4 stored bd_addrs + all BTstack link keys in one shot.
+- Inquiry filter on `HCI_EVENT_INQUIRY_RESULT` enforces slot ownership: devices stored in other slots are skipped; empty slots auto-assign on the first L2CAP HID_CONTROL channel open.
+- Dongle stops being BT-discoverable once all 4 slots are full (security tightening; was permanently discoverable in upstream).
+- Storage: BTstack's TLV link-key DB holds the keys (`NVM_NUM_LINK_KEYS=4`, unchanged from upstream); a new dedicated flash sector holds the 4 bd_addrs + occupancy bits + magic word.
+- Multi-slot UX modeled on [zurce/DS5Dongle-OLED](https://github.com/zurce/DS5Dongle-OLED). Credit to zurce.
+
+### Added — security / correctness audit pass
+
+Critical and high-severity fixes on the core bridge code. Many of these have since landed upstream independently; this changelog captures what this fork shipped.
+
+- **C1**: 4.8× stack-overflow in `core1_entry`'s `out_buf` (200 floats vs. 960 floats the resampler/encoder actually writes/reads). Root cause of the long-standing "audio may experience slight stuttering" known issue. Buffer resized and Opus return value now checked.
+- **C2 + H5**: Variable-length stack array in `set_feature_data` sized by host-controlled length (potential stack blowup). Replaced with a bounded fixed buffer + length validation; CRC bounds tightened so `len < 4` no longer wraps to a huge `size_t`.
+- **C3**: Unbounded `memcpy` into a 78-byte stack buffer in `tud_hid_set_report_cb` for HID report 0x02 (overflow if `bufsize > 76`). Bounded.
+- **H1**: `tud_hid_get_report_cb` wrote `feature_data.size() - 1` bytes into the host-supplied buffer without clamping to `reqlen` (host-buffer overflow). Clamped.
+- **H2**: OOB read in `on_bt_data` (`data[56]` / `memcpy(.., data+3, 63)` with no length check on the incoming BT frame). Bounded.
+- **H3**: Same pattern in `l2cap_packet_handler` (`packet[3]` read with no size check). Bounded.
+- **H4**: UAC1 volume parsed as `uint16` instead of signed `int16` — non-conformant hosts could crank haptic gain to 256× and saturate everything. Fixed sign extension.
+- **H7**: BT report sequence counter in `main.cpp` cycled with period 16 (incremented as `int`, written as `(c<<4)`). Replaced with the correct `(c+1) & 0x0F` wrap used in `audio.cpp`.
+- **N1**: Pairing-failure recovery: three `gap_inquiry_start(30)` calls were commented out in `bt.cpp`'s error paths (HCI command status, connection complete, authentication complete). Dongle would soft-brick after any pairing failure that didn't end in a disconnect. Uncommented.
+- **N2**: Removed printf of the bonding link-key to UART on every reconnect.
+- **N3**: CRC-helper bounds: `fill_output_report_checksum` / `fill_feature_report_checksum` underflowed `size_t` and wrote at negative offsets on `len < 4`. Guarded.
+- **N4**: HCI command-send return values logged so a future stuck-dongle report has observability.
+- **N5**: Watchdog enabled (8 s). Hangs now recover automatically instead of needing a power-cycle.
+
+### Added — pairing posture hardening
+
+- Tightened `gap_discoverable_control(1)` — the dongle now only advertises as pairable when at least one slot is empty. Once all 4 slots are full, it goes non-discoverable (still connectable to bonded controllers).
+- (Carried over from upstream's own hardening; documented here for completeness.)
+
+### Changed
+
+- Project rebranded as **OLED Edition** to differentiate from upstream. UF2 artifact renamed: `ds5-bridge.uf2` → `ds5-bridge-oled.uf2`.
+- README rewritten with full hardware section (Pico 2 W + Pico-OLED-1.3 SKUs, vendor links, prices), all 10 OLED screen mockups in the new cycle order, and explicit `TINYUSB 0.20.0` pin requirement (the 0.18.0 bundled with Pico SDK 2.2.0 lacks the 4-arg form of `TUD_AUDIO_EP_SIZE` used by this project's `tusb_config.h`).
+- KEY1 short-press: was a 250 ms test-rumble burst on most screens; now cycles **backward** through screens (mirror of KEY0). Still cycles trigger preset on Trigger Test and lightbar mode on Lightbar (their primary in-screen interactions).
+- Screen cycle order reorganized: **Status → Slots → Lightbar → Trigger Test → Gyro Tilt → Touchpad → Diagnostics → RSSI → VU Meters → Settings**. Settings last; the three "test" stimulus screens grouped together; diagnostic screens grouped together. Screen indices are symbolic constants (`kScreenStatus`, `kScreenSlots`, …) so future reorders are a one-block edit.
+
+### Fixed
+
+- `config_default()` was declared in `config.h` but never defined upstream (latent "undefined symbol" → linker "dangerous relocation" if anything called it). Implemented (fills body with `0xFF`, runs `config_valid()` — same path as a freshly-erased flash sector).
+- GitHub Actions workflow `cp` paths corrected to match the `ds5-bridge-oled.uf2` produced after the CMake `OUTPUT_NAME` rename. (Workflows had failed on every push since the rebrand commit.)
+
+### Build
+
+- TinyUSB pinned to `0.20.0` (required; see Build Instructions in README).
+- Pico SDK 2.2.0 + toolchain `14_2_Rel1` validated. Pico 2 W (RP2350) is the primary target.
+- `CMakeLists.txt` adds `src/oled.cpp` + `src/slots.cpp` to the executable target, links `hardware_spi`.
+- `OUTPUT_NAME` set to `ds5-bridge-oled` so the UF2 reflects the project name.
+
+### Acknowledgements
+
+- **[awalol/DS5Dongle](https://github.com/awalol/DS5Dongle)** — upstream base. This fork is a strict superset that tracks upstream and layers add-on features.
+- **[zurce/DS5Dongle-OLED](https://github.com/zurce/DS5Dongle-OLED)** — pixel-art icon approach, the "hold for factory reset" UX pattern, and the multi-slot persistent pairing model.
+
+---
+
+[0.5.4]: https://github.com/MarcelineVPQ/DS5Dongle-OLED-Edition/releases/tag/v0.5.4

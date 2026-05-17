@@ -102,7 +102,15 @@ tusb_desc_device_t desc_device =
 
     .iManufacturer = 0x01,
     .iProduct = 0x02,
-    .iSerialNumber = 0x00,
+    // OLED Edition restores the per-board serial number that upstream stripped
+    // in commit e79c762 ("remove usb serialnumber #32"). Without it, Windows
+    // treats the dongle as a NEW device for each USB port (issue awalol#100):
+    // users lose their per-device volume / app preferences when they move
+    // ports. The trade-off (re-introducing SpecialK incompatibility from #32)
+    // affects only Windows users with that specific tool; the broader Windows
+    // population gets stable device identity back. The serial string itself
+    // is produced by board_usb_get_serial() from the flash chip's unique ID.
+    .iSerialNumber = STRID_SERIAL,
 
     .bNumConfigurations = 0x01
 };

@@ -52,8 +52,8 @@ void config_valid() {
         printf("[Config] Haptics Gain value is invalid\n");
     }
     if (std::isnan(body->speaker_volume) || body->speaker_volume < -100 || body->speaker_volume > 0) {
-        body->speaker_volume = -100;
-        printf("[Config] Speaker Volume is invalid\n");
+        body->speaker_volume = 0;  // OLED Edition: 0 dB default (unity); -100 would be silent
+        printf("[Config] Speaker Volume is invalid, defaulting to 0 dB\n");
     }
     if (body->inactive_time < 5 || body->inactive_time > 60) {
         body->inactive_time = 30;
@@ -79,6 +79,22 @@ void config_valid() {
         body->controller_mode = 2;
         printf("[Config] controller_mode is invalid\n");
     }
+    if (body->current_slot >= 4) {
+        body->current_slot = 0;
+        printf("[Config] current_slot is invalid\n");
+    }
+    if (body->auto_haptics_enable > 3) {
+        body->auto_haptics_enable = 1; // Fallback default
+        printf("[Config] auto_haptics_enable invalid, defaulting to 1 (Fallback)\n");
+    }
+    if (body->auto_haptics_gain > 200) {
+        body->auto_haptics_gain = 100;
+        printf("[Config] auto_haptics_gain invalid, defaulting to 100\n");
+    }
+    if (body->auto_haptics_lowpass > 3) {
+        body->auto_haptics_lowpass = 1; // 160 Hz
+        printf("[Config] auto_haptics_lowpass invalid, defaulting to 1 (160 Hz)\n");
+    }
     if (body->config_version != CONFIG_VERSION) {
         body->config_version = CONFIG_VERSION;
         printf("[Config] Warning: Config may breaking change\n");
@@ -88,6 +104,15 @@ void config_valid() {
 void config_load() {
     memcpy(&config, flash_config(), sizeof(Config));
 
+    config_valid();
+}
+
+// Reset RAM-resident config body to firmware defaults. Caller must
+// config_save() to persist. Filling with 0xFF mirrors the byte pattern
+// of a freshly-erased flash sector, so every field fails validity and
+// gets re-initialized to its documented default by config_valid().
+void config_default() {
+    memset(&config.body, 0xFF, sizeof(config.body));
     config_valid();
 }
 

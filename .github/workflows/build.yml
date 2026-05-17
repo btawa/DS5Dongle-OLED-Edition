@@ -86,7 +86,7 @@ jobs:
             -DVERSION="$FIRMWARE_VERSION"
           cmake --build build/standard --target ds5-bridge
           mkdir -p artifacts
-          cp build/standard/ds5-bridge.uf2 artifacts/ds5-bridge.uf2
+          cp build/standard/ds5-bridge-oled.uf2 artifacts/ds5-bridge-oled.uf2
 
       - name: Build Debug firmware
         run: |
@@ -97,7 +97,7 @@ jobs:
             -DENABLE_VERBOSE=ON \
             -DVERSION="$FIRMWARE_VERSION"
           cmake --build build/debug --target ds5-bridge
-          cp build/debug/ds5-bridge.uf2 artifacts/ds5-bridge-debug.uf2
+          cp build/debug/ds5-bridge-oled.uf2 artifacts/ds5-bridge-oled-debug.uf2
 
       - name: Build no-batt-led firmware (compile check only)
         run: |
@@ -116,25 +116,25 @@ jobs:
             -DPICO_W_BUILD=ON \
             -DVERSION="$FIRMWARE_VERSION"
           cmake --build build/picow --target ds5-bridge
-          cp build/picow/ds5-bridge.uf2 artifacts/ds5-bridge-picow.uf2
+          cp build/picow/ds5-bridge-oled.uf2 artifacts/ds5-bridge-oled-picow.uf2
 
       - name: Upload standard UF2 artifact
         uses: actions/upload-artifact@v7
         with:
-          path: artifacts/ds5-bridge.uf2
+          path: artifacts/ds5-bridge-oled.uf2
           archive: false
           if-no-files-found: error
 
       - name: Upload Debug UF2 artifact
         uses: actions/upload-artifact@v7
         with:
-          path: artifacts/ds5-bridge-debug.uf2
+          path: artifacts/ds5-bridge-oled-debug.uf2
           archive: false
           if-no-files-found: error
 
       - name: Upload PicoW UF2 artifact
         uses: actions/upload-artifact@v7
         with:
-          path: artifacts/ds5-bridge-picow.uf2
+          path: artifacts/ds5-bridge-oled-picow.uf2
           archive: false
           if-no-files-found: error
