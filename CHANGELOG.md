@@ -8,6 +8,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Version
 
 ## [Unreleased]
 
+---
+
+## [0.6.1-oled-edition] — 2026-05-18
+
+Tagged release of the v0.6.0-oled-edition follow-up. UF2s attached to [the GitHub release](https://github.com/MarcelineVPQ/DS5Dongle-OLED-Edition/releases/tag/v0.6.1-oled-edition) (built by `.github/workflows/release.yml`).
+
 ### Added
 
 - **CPU / Clock diagnostics screen** (`kScreenCpu`, inserted between Diagnostics and BT Signal in the K0 cycle). Shows the configured system clock (`SYS_CLOCK_KHZ` — the overclock target), the *actually running* `clk_sys` measured live by the RP2350 on-chip frequency counter against the crystal reference, the core voltage read back from the regulator (`vreg_get_voltage()`, not the compile-time constant), and the RP2350 on-die temperature (ADC input 4). Pure read-only instrumentation; one-time ADC bring-up and no other code path uses the ADC, so it is conflict-free. `render_screen_cpu()` is `noinline` like the other render functions (Thumb literal-pool reach). Adds `hardware_adc` to `target_link_libraries`. The frequency-counter measurement (a multi-ms busy-wait) runs **once on screen entry** and is cached — `clk_sys` is fixed at boot, so only the temperature refreshes per frame, avoiding a per-frame BT/audio hitch while the screen is visible. `oled_loop()` gained a generic `screen_entered` flag for this. Hardware-verified on Pico 2 W + OLED. Also exported over a new HID feature report **`0xfc`** (`src/cmd.cpp`) — 11 bytes: set_khz, cached real_khz, vreg code, ADC ch4 raw — so the web config emulator can show live CPU telemetry (volts/temp math done web-side to keep the firmware HID path float-free).
