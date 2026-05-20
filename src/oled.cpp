@@ -19,6 +19,9 @@ extern uint8_t interrupt_in_data[63]; // defined in main.cpp
 
 // Mic diagnostic counters (defined in main.cpp).
 extern uint32_t bt_31_packet_count();
+extern uint32_t host_out02_total();
+extern uint32_t host_out02_trig_allow();
+extern uint32_t host_out02_to_bt();
 extern uint8_t  bt_31_last_byte2();
 extern uint8_t  bt_31_b2_or_mask();
 extern uint16_t bt_31_len_min();
@@ -627,35 +630,36 @@ __attribute__((noinline)) void render_screen_rssi() {
     flush_fb();
 }
 
-__attribute__((noinline)) void render_screen_diag() {
-    fb_clear();
+// Diagnostics screen state. Read-only viewport that scrolls with controller
+// D-pad up/down. No cursor — there's nothing to select.
+int   diag_scroll = 0;
+uint8_t diag_last_dpad = 8; // edge-trigger N/E/S/W like settings_handle_input
 
-    draw_text(kContentX, 0, "Diagnostics");
+// Per-second rates sampled once per render, shared across format_diag_row's
+// rate-based rows so they stay in sync.
+struct DiagRates {
+    uint32_t usb_rate;
+    uint32_t bt_rate;
+    uint32_t mic_rate;
+    uint32_t bt31_rate;
+};
+DiagRates g_diag_rates{};
 
-    const uint32_t uptime_s = time_us_32() / 1000000u;
-    const uint32_t h = uptime_s / 3600u;
-    const uint32_t m = (uptime_s / 60u) % 60u;
-    const uint32_t s = uptime_s % 60u;
-    char buf[24];
-    snprintf(buf, sizeof(buf), "Up:%luh %02lum %02lus", (unsigned long)h, (unsigned long)m, (unsigned long)s);
-    draw_text(kContentX, 9, buf);
-
-    // Per-second rates for the audio path counters — recompute every render.
+void sample_diag_rates() {
     static uint32_t prev_us_frames = 0, prev_bt_packets = 0, prev_mic_frames = 0, prev_bt31 = 0;
     static uint32_t prev_sample_us = 0;
     const uint32_t now_us = time_us_32();
-    const uint32_t cur_us_frames = audio_usb_frames();
+    const uint32_t cur_us_frames  = audio_usb_frames();
     const uint32_t cur_bt_packets = audio_bt_packets();
     const uint32_t cur_mic_frames = audio_mic_frames();
-    const uint32_t cur_bt31 = bt_31_packet_count();
-    uint32_t usb_rate = 0, bt_rate = 0, mic_rate = 0, bt31_rate = 0;
+    const uint32_t cur_bt31       = bt_31_packet_count();
     if (prev_sample_us != 0 && now_us > prev_sample_us) {
         const uint32_t dt_us = now_us - prev_sample_us;
         if (dt_us > 0) {
-            usb_rate  = (uint32_t)(((uint64_t)(cur_us_frames  - prev_us_frames)  * 1000000u) / dt_us);
-            bt_rate   = (uint32_t)(((uint64_t)(cur_bt_packets - prev_bt_packets) * 1000000u) / dt_us);
-            mic_rate  = (uint32_t)(((uint64_t)(cur_mic_frames - prev_mic_frames) * 1000000u) / dt_us);
-            bt31_rate = (uint32_t)(((uint64_t)(cur_bt31       - prev_bt31)       * 1000000u) / dt_us);
+            g_diag_rates.usb_rate  = (uint32_t)(((uint64_t)(cur_us_frames  - prev_us_frames)  * 1000000u) / dt_us);
+            g_diag_rates.bt_rate   = (uint32_t)(((uint64_t)(cur_bt_packets - prev_bt_packets) * 1000000u) / dt_us);
+            g_diag_rates.mic_rate  = (uint32_t)(((uint64_t)(cur_mic_frames - prev_mic_frames) * 1000000u) / dt_us);
+            g_diag_rates.bt31_rate = (uint32_t)(((uint64_t)(cur_bt31       - prev_bt31)       * 1000000u) / dt_us);
         }
     }
     prev_us_frames  = cur_us_frames;
@@ -663,20 +667,93 @@ __attribute__((noinline)) void render_screen_diag() {
     prev_mic_frames = cur_mic_frames;
     prev_bt31       = cur_bt31;
     prev_sample_us  = now_us;
+}
 
-    snprintf(buf, sizeof(buf), "BT31 %lu Mic %lu/s", (unsigned long)bt31_rate, (unsigned long)mic_rate);
-    draw_text(kContentX, 18, buf);
-    uint8_t pfx[6]; bt_31_mic_prefix(pfx);
-    snprintf(buf, sizeof(buf), "%02X %02X %02X %02X %02X %02X",
-             pfx[0], pfx[1], pfx[2], pfx[3], pfx[4], pfx[5]);
-    draw_text(kContentX, 27, buf);
-    snprintf(buf, sizeof(buf), "dec=%ld w=%u",
-             (long)audio_mic_last_decoded(),
-             (unsigned)audio_mic_last_wrote());
-    draw_text(kContentX, 36, buf);
+// Row list ordered by relevance: always-useful at top, parked-mic-investigation
+// data at bottom. To add a row, bump kNumDiagRows and add a case.
+constexpr int kNumDiagRows = 10;
+__attribute__((noinline))
+void format_diag_row(int idx, char* line, size_t n) {
+    switch (idx) {
+        case 0: {
+            const uint32_t s = time_us_32() / 1000000u;
+            snprintf(line, n, "Up:%luh %02lum %02lus",
+                     (unsigned long)(s / 3600u),
+                     (unsigned long)((s / 60u) % 60u),
+                     (unsigned long)(s % 60u));
+            break;
+        }
+        case 1:
+            snprintf(line, n, "BT: %s", bt_is_connected() ? "connected" : "waiting");
+            break;
+        case 2:
+            snprintf(line, n, "host02: %lu", (unsigned long)host_out02_total());
+            break;
+        case 3:
+            snprintf(line, n, "trig %lu / tx %lu",
+                     (unsigned long)host_out02_trig_allow(),
+                     (unsigned long)host_out02_to_bt());
+            break;
+        case 4:
+            snprintf(line, n, "BT31 in: %lu/s", (unsigned long)g_diag_rates.bt31_rate);
+            break;
+        case 5:
+            snprintf(line, n, "USB aud: %lu/s", (unsigned long)g_diag_rates.usb_rate);
+            break;
+        case 6:
+            snprintf(line, n, "BT32 out: %lu/s", (unsigned long)g_diag_rates.bt_rate);
+            break;
+        case 7:
+            snprintf(line, n, "Mic in: %lu/s", (unsigned long)g_diag_rates.mic_rate);
+            break;
+        case 8:
+            snprintf(line, n, "Mic dec=%ld w=%u",
+                     (long)audio_mic_last_decoded(),
+                     (unsigned)audio_mic_last_wrote());
+            break;
+        case 9: {
+            uint8_t pfx[6]; bt_31_mic_prefix(pfx);
+            snprintf(line, n, "%02X %02X %02X %02X %02X %02X",
+                     pfx[0], pfx[1], pfx[2], pfx[3], pfx[4], pfx[5]);
+            break;
+        }
+        default:
+            line[0] = '\0';
+            break;
+    }
+}
 
-    snprintf(buf, sizeof(buf), "BT: %s", bt_is_connected() ? "connected" : "waiting");
-    draw_text(kContentX, 45, buf);
+void diag_handle_input(int visible) {
+    if (!bt_is_connected()) return;
+    const uint8_t dpad = (uint8_t)(interrupt_in_data[7] & 0x0F);
+    if (dpad != diag_last_dpad && dpad != 8) {
+        if      (dpad == 0) diag_scroll--; // up
+        else if (dpad == 4) diag_scroll++; // down
+    }
+    diag_last_dpad = dpad;
+    const int max_top = (kNumDiagRows > visible) ? (kNumDiagRows - visible) : 0;
+    if (diag_scroll < 0) diag_scroll = 0;
+    if (diag_scroll > max_top) diag_scroll = max_top;
+}
+
+__attribute__((noinline)) void render_screen_diag() {
+    fb_clear();
+    draw_text(kContentX, 0, "Diagnostics");
+
+    sample_diag_rates();
+    constexpr int kVisible = 5;
+    diag_handle_input(kVisible);
+
+    char line[28];
+    for (int i = 0; i < kVisible && diag_scroll + i < kNumDiagRows; i++) {
+        format_diag_row(diag_scroll + i, line, sizeof(line));
+        draw_text(kContentX, 9 + i * 9, line);
+    }
+
+    // Scroll indicators along the right edge, adjacent to the visible content
+    // rather than in a footer — keeps the bottom row available for content.
+    if (diag_scroll > 0)                       draw_text(120, 9,  "^");
+    if (diag_scroll + kVisible < kNumDiagRows) draw_text(120, 45, "v");
 
     flush_fb();
 }

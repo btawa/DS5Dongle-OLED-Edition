@@ -56,6 +56,24 @@ void bt_31_mic_prefix(uint8_t out[6]) {
     for (int i = 0; i < 6; i++) out[i] = g_mic_prefix[i];
 }
 
+// Trigger-flow diagnostics. Counts host → dongle → BT path for adaptive
+// trigger effects. Lets us tell which link in the chain breaks when games
+// like Death Stranding 2 don't produce trigger tension via the dongle:
+//   out02_total     - every 0x02 HID OUT report received from host
+//   out02_trig_allow - of those, how many set AllowRight/LeftTriggerFFB
+//                     (valid_flag0 bits 2 & 3) — i.e. the host actually
+//                     told us "apply trigger FFB"
+//   out02_to_bt     - 0x02 reports that we forwarded to the controller as
+//                     a BT 0x31 sub-0x10 packet (gated off when speaker is
+//                     active; audio.cpp's 0x36 path carries state then)
+// Surfaced on the OLED Diagnostics screen.
+volatile uint32_t g_host_out02_total = 0;
+volatile uint32_t g_host_out02_trig_allow = 0;
+volatile uint32_t g_host_out02_to_bt = 0;
+uint32_t host_out02_total()      { return g_host_out02_total; }
+uint32_t host_out02_trig_allow() { return g_host_out02_trig_allow; }
+uint32_t host_out02_to_bt()      { return g_host_out02_to_bt; }
+
 uint8_t interrupt_in_data[63] = {
     0x7f, 0x7d, 0x7f, 0x7e, 0x00, 0x00, 0xa7,
     0x08, 0x00, 0x00, 0x00, 0x52, 0x43, 0x30, 0x41,
@@ -248,6 +266,12 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
     if (report_id == 0) {
         switch (buffer[0]) {
             case 0x02: {
+                g_host_out02_total++;
+                // valid_flag0 lives at buffer[1] (right after the 0x02 report id).
+                // Bits 2 & 3 are AllowRight/LeftTriggerFFB.
+                if (bufsize > 1 && (buffer[1] & 0x0C)) {
+                    g_host_out02_trig_allow++;
+                }
                 state_update(buffer + 1, bufsize - 1);
                 if (spk_active) {
                     break;
@@ -262,6 +286,7 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
                 // memcpy(outputData + 3, buffer + 1, bufsize - 1);
                 state_set(outputData + 3,sizeof(SetStateData));
                 bt_write(outputData, sizeof(outputData));
+                g_host_out02_to_bt++;
                 break;
             }
         }
