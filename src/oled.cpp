@@ -71,11 +71,22 @@ constexpr int kNumBrightLevels = sizeof(kBrightLevels) / sizeof(kBrightLevels[0]
 int bright_idx = 0;
 uint8_t current_contrast = 0xFF;
 
-// Auto-dim after idle. Tracks last button/input activity.
+// Auto-dim / auto-off after idle. Tracks last button/input activity.
+// Tier 1: Active → full brightness (bright_idx).
+// Tier 2: idle > kAutoDimUs → contrast drops to kDimContrast (deep dim).
+// Tier 3: idle > kAutoOffUs → SH1107 panel turned fully off (cmd 0xAE)
+//         to prevent OLED burn-in on long unattended sits.
+// kDimContrast tuned by eye: 0x10 looked like only ~10% reduction on this
+// panel (contrast-vs-brightness is heavily non-linear near the bottom of
+// the register range). 0x02 is visibly dim while still legible up close.
 uint32_t last_activity_us = 0;
 uint32_t last_input_hash = 0;
-constexpr uint32_t kAutoDimUs = 5UL * 60UL * 1000000UL; // 5 min
-constexpr uint8_t kDimContrast = 0x10;
+constexpr uint32_t kAutoDimUs = 2UL * 60UL * 1000000UL;  // 2 min — generous for pairing
+constexpr uint32_t kAutoOffUs = 15UL * 60UL * 1000000UL; // 15 min
+constexpr uint8_t kDimContrast = 0x01;
+enum OledPowerState { OLED_ACTIVE, OLED_DIM, OLED_OFF };
+OledPowerState oled_power_state = OLED_ACTIVE;
+bool prev_bt_connected = false;
 
 // Screen ordering — single source of truth. Reorder by editing this block;
 // oled_loop's switch and handle_buttons' KEY1 contextual checks use these
@@ -201,8 +212,7 @@ void sh1107_init() {
 // lives near the other text-drawing helpers below.
 void draw_button_chrome();
 
-void flush_fb() {
-    draw_button_chrome();
+void flush_fb_raw() {
     cmd(0xB0);
     for (int j = 0; j < kH; j++) {
         const uint8_t col = kH - 1 - j;
@@ -212,6 +222,11 @@ void flush_fb() {
             data_byte(reverse_byte(fb[j * kRowBytes + i]));
         }
     }
+}
+
+void flush_fb() {
+    draw_button_chrome();
+    flush_fb_raw();
 }
 
 void fb_clear() { memset(fb, 0, sizeof(fb)); }
@@ -1334,6 +1349,36 @@ void oled_init() {
     boot_splash();
 }
 
+// Dim-tier renderer: blank the panel and draw a tiny "I'm alive" dot that
+// breathes (1s on / 1s off) and walks through 8 evenly-spaced positions every
+// ~30 s. Two goals: (1) reduce total pixel-on-time to a tiny fraction so the
+// panel barely glows even with the contrast register pinned, (2) prevent any
+// single pixel from accumulating wear. noinline keeps oled_loop's literal pool
+// in Thumb's 4 KB reach (same constraint the other render_screen_* hit).
+__attribute__((noinline))
+void render_dim_pulse(uint32_t dim_elapsed_us) {
+    fb_clear();
+    constexpr uint32_t kPulsePeriodUs = 2UL * 1000000UL; // 2 s blink cycle
+    constexpr uint32_t kPulseOnUs     = 1UL * 1000000UL; // 1 s on, 1 s off
+    constexpr uint32_t kPosStepUs     = 30UL * 1000000UL; // 30 s per position
+    constexpr int kPositions[][2] = {
+        { 16,  8}, { 64,  8}, {112,  8},
+        {112, 32},
+        {112, 56}, { 64, 56}, { 16, 56},
+        { 16, 32},
+    };
+    constexpr int kNumPositions = sizeof(kPositions) / sizeof(kPositions[0]);
+    const bool dot_on = (dim_elapsed_us % kPulsePeriodUs) < kPulseOnUs;
+    if (dot_on) {
+        const int idx = (int)((dim_elapsed_us / kPosStepUs) % (uint32_t)kNumPositions);
+        const int cx = kPositions[idx][0];
+        const int cy = kPositions[idx][1];
+        // 2x2 dot — small enough to barely register, big enough to see across a desk.
+        rect_filled(cx, cy, 2, 2);
+    }
+    flush_fb_raw(); // skip chrome arrows; nothing to navigate to from sleep
+}
+
 void oled_loop() {
     handle_buttons();
     const uint32_t now = time_us_32();
@@ -1347,10 +1392,30 @@ void oled_loop() {
         last_input_hash = hash;
         last_activity_us = now;
     }
+    // Rising-edge: BT-connect itself counts as activity, so the screen wakes
+    // the moment a controller pairs rather than waiting for the first input.
+    const bool bt_connected_now = bt_is_connected();
+    if (bt_connected_now && !prev_bt_connected) last_activity_us = now;
+    prev_bt_connected = bt_connected_now;
 
-    // Auto-dim after idle; respect user-selected brightness otherwise
-    const bool idle = (now - last_activity_us) > kAutoDimUs;
-    sh1107_set_contrast(idle ? kDimContrast : kBrightLevels[bright_idx]);
+    // Power-state ladder: Active → Dim (breathing dot) → Off based on idle time.
+    const uint32_t idle = now - last_activity_us;
+    if (idle > kAutoOffUs) {
+        if (oled_power_state != OLED_OFF) {
+            cmd(0xAE);
+            oled_power_state = OLED_OFF;
+        }
+        return; // panel is off, nothing to draw
+    }
+    if (oled_power_state == OLED_OFF) cmd(0xAF); // wake panel before drawing
+    if (idle > kAutoDimUs) {
+        sh1107_set_contrast(kDimContrast);
+        oled_power_state = OLED_DIM;
+        render_dim_pulse(idle - kAutoDimUs);
+        return; // skip the regular per-screen render path
+    }
+    sh1107_set_contrast(kBrightLevels[bright_idx]);
+    oled_power_state = OLED_ACTIVE;
 
     // True on the first render after navigating to a different screen.
     // Lets a screen do expensive one-shot work on entry (the CPU screen
