@@ -8,6 +8,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Version
 
 ## [Unreleased]
 
+---
+
+## [0.6.9-oled-edition] — 2026-05-24
+
+Headline feature: **on-dongle button remapping** — reassign any of the 16 digital controls, stored on the dongle so it works in every game and on every OS with no host-side software, edited visually in the web config tool's new **Remap** tab (a click-the-controller diagram built on Zacksly's CC BY 3.0 DualSense art). Also ships **packet-loss concealment** for the BT microphone. UF2s attached to [the GitHub release](https://github.com/MarcelineVPQ/DS5Dongle-OLED-Edition/releases/tag/v0.6.9-oled-edition) (built by `.github/workflows/release.yml`); this is the first release without the debug UF2 as a download.
+
 ### Added
 
 - **Button remapping.** Any of the 16 digital controls (face buttons, D-pad, shoulders/triggers, stick clicks, Create/Options) can be remapped to any other — stored on the dongle, applied transparently before the host sees the report, so it works on every OS and every game with no host-side software. The remap table lives in its own dedicated flash sector (`PICO_FLASH_SIZE_BYTES - 3·FLASH_SECTOR_SIZE`, magic `DS5\x03`, below the slots sector) and survives reboot; identity (no remap) is the default. Multiple sources mapping to one target OR together (analog L2/R2 take the max); a source can be set to *disabled* (`0xFF`). The remap acts on the **outgoing host report copy only** — the raw input the OLED screens and the PS+Mute reboot combo read is untouched. Edited over the existing `0xF6`/`0xF7` vendor reports with a hardened `RM`+version frame (**no HID-descriptor change**, so Windows enumeration is unaffected) and a revision counter the host polls to confirm a write landed. New `src/remap.{h,cpp}`; apply logic + button set ported from [SundayMoments/DS5_Bridge](https://github.com/SundayMoments/DS5_Bridge) (credit). Dev helper `scripts/remap_test.py` exercises the path over `/dev/hidraw` without the web tool.
