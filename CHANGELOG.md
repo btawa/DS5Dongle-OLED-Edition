@@ -8,6 +8,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Version
 
 ## [Unreleased]
 
+### Added
+
+- **L3 / R3 click indicator on the OLED Status screen.** Clicking a stick in now flashes its analog-stick box inverse (white box, black dot) for as long as it's held — previously the stick clicks had no on-screen feedback. Mirrored in the web config tool's OLED Preview.
+
 ---
 
 ## [0.6.9-oled-edition] — 2026-05-24
