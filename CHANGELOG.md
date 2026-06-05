@@ -8,6 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Version
 
 ## [Unreleased]
 
+### Changed
+
+- **`polling_rate_mode` now defaults to realtime / 1000 Hz** (was 250 Hz) so a fresh flash matches a wired DualSense's 1 ms input latency instead of polling 4× slower. Mode 2 also bypasses the report-throttling used by the 250/500 Hz modes, forwarding every BT input report immediately. Existing saved configs keep their value; this only affects fresh flashes / Reset-to-defaults. (Out-of-box "acts like USB" pass.)
+- **`bt_mic_enable` now defaults to Off** (was On) — the DualSense BT microphone path has a confirmed playback-rate bug (issue #10: recordings come out ~2× too fast / half-duration). Until that's root-caused on hardware, the mic is opt-in: fresh flashes / Reset-to-defaults boot with it off, and it can be turned on from the OLED **Settings** screen (`BT Mic`) or the web config. Existing saved configs keep their current value. (Web config default should be flipped to match in `DS5Dongle-OLED-Config-Web`.)
+
+### Known issues
+
+- **BT microphone records ~2× too fast (#10).** The mic playout stage is wall-clock paced at 10 ms / 480 samples into a 48 kHz endpoint, which should be real-time, so the 2× points at the on-wire frame size/rate differing from the assumed 480 samples. Needs the OLED **Diagnostics** `Mic dec=` (samples per `opus_decode`) and `Mic in/s` (arrival rate) read on hardware to make the fix deterministic — `Mic dec=240` would confirm a half-rate stream. Mic is opt-in (off by default) in the meantime.
+
 ---
 
 ## [0.6.11-oled-edition] — 2026-06-02

@@ -67,9 +67,11 @@ void config_valid() {
         body->disable_pico_led = 0;
         printf("[Config] disable_pico_led is invalid\n");
     }
-    if (body->polling_rate_mode > 2) {
-        body->polling_rate_mode = 0;
-        printf("[Config] polling_rate_mode is invalid\n");
+    if (body->polling_rate_mode > 2) {        // 0xFF erased / out of range → default
+        body->polling_rate_mode = 2;          // realtime / 1000 Hz — match a wired DS5's
+                                              // 1 ms polling (was 0 / 250 Hz). Existing
+                                              // saved configs keep their value.
+        printf("[Config] polling_rate_mode invalid, defaulting to 2 (1000 Hz)\n");
     }
     if (body->audio_buffer_length < 16 || body->audio_buffer_length > 128) {
         body->audio_buffer_length = 16;  // low buffer avoids the DS5's periodic re-buffer gap
@@ -109,9 +111,13 @@ void config_valid() {
         body->screen_off_timeout = 15;    // mirrors the original 15-min off tier
         printf("[Config] screen_off_timeout invalid, defaulting to 15 min\n");
     }
-    if (body->bt_mic_enable > 1) {        // 0xFF erased / upgrade → default ON
-        body->bt_mic_enable = 1;
-        printf("[Config] bt_mic_enable invalid, defaulting to 1 (on)\n");
+    if (body->bt_mic_enable > 1) {        // 0xFF erased / upgrade → default OFF
+        body->bt_mic_enable = 0;          // opt-in: the BT mic path has a known
+                                          // 2x-playback-rate bug (#10), so it is
+                                          // off until explicitly enabled (Settings
+                                          // screen / web config). Existing saved
+                                          // configs keep their value.
+        printf("[Config] bt_mic_enable invalid, defaulting to 0 (off)\n");
     }
     if (body->screen_brightness > 3) {    // kBrightLevels has 4 entries (0..3)
         body->screen_brightness = 0;      // full brightness
