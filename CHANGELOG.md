@@ -8,6 +8,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Version
 
 ## [Unreleased]
 
+### Added (experimental — `audio/speaker-rate-trim` branch)
+
+- **`SpkTrim` setting — fine speaker clock-drift trim to chase the periodic crackle (#7).** The DS5's DAC and the USB host's audio clock are independent ~48 kHz crystals; the residual ppm mismatch slowly drifts the controller's audio buffer, which underruns and crackles. The speaker path now delivers `48000 + trim` samples/s (via a zero-order-hold duplicate/drop accumulator) instead of exactly 48000, to null that drift. New `speaker_rate_trim` config field (stored 0–200 = **−100…+100 Hz**, default **0 Hz** = exact no-op), swept on the OLED **Settings** screen with the D-pad ▶◀ at 1 Hz/step. **Experimental / diagnostic:** if one value silences the crackle and *holds*, the drift was a static offset and this is the fix; if it nulls then creeps back, that proves the drift is dynamic and needs adaptive resampling. Tune with `scripts/sine_ch12.py` playing a steady tone and time the interval between crackles.
+
 ---
 
 ## [0.6.11-oled-edition] — 2026-06-02

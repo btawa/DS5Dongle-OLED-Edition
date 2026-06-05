@@ -130,7 +130,7 @@ constexpr int kLbModeHost = 8;
 constexpr int kNumLbModes = 9;
 
 // Settings screen state
-constexpr int kNumSettingsItems = 17; // 8 fields + 3 auto-haptic + 2 screen-timeout + BT mic + Ctrl-wake + Reset + Wipe
+constexpr int kNumSettingsItems = 18; // 8 fields + 3 auto-haptic + 2 screen-timeout + BT mic + Ctrl-wake + Spk-trim + Reset + Wipe
 constexpr int kSettingsAutoHapEnaIdx  = 8;
 constexpr int kSettingsAutoHapGainIdx = 9;
 constexpr int kSettingsAutoHapLpIdx   = 10;
@@ -138,8 +138,9 @@ constexpr int kSettingsScrDimIdx      = 11;
 constexpr int kSettingsScrOffIdx      = 12;
 constexpr int kSettingsBtMicIdx       = 13;
 constexpr int kSettingsCtrlWakeIdx    = 14;
-constexpr int kSettingsResetIdx       = 15;
-constexpr int kSettingsWipeSlotsIdx   = 16;
+constexpr int kSettingsSpkTrimIdx     = 15;
+constexpr int kSettingsResetIdx       = 16;
+constexpr int kSettingsWipeSlotsIdx   = 17;
 Config_body settings_local{};
 int settings_sel = 0;
 bool settings_dirty = false;
@@ -1599,6 +1600,12 @@ void settings_adjust(int delta) {
         }
         case 13: c.bt_mic_enable ^= 1; break; // BT mic on/off
         case 14: c.controller_wakes_display ^= 1; break; // controller activity wakes OLED on/off
+        case 15: { // speaker_rate_trim  stored 0..200 = -100..+100 Hz, 1 Hz/step
+            int v = (int)c.speaker_rate_trim + delta;
+            if (v < 0) v = 0; if (v > 200) v = 200;
+            c.speaker_rate_trim = (uint8_t)v;
+            break;
+        }
     }
 }
 
@@ -1702,8 +1709,9 @@ __attribute__((noinline)) void format_settings_item(int idx, char* line, size_t 
             break;
         case 13: snprintf(line, n, "%s BT Mic %s", cur, c.bt_mic_enable ? "on" : "off"); break;
         case 14: snprintf(line, n, "%s CtrlWake %s", cur, c.controller_wakes_display ? "on" : "off"); break;
-        case 15: snprintf(line, n, "%s Reset to defaults", cur); break;
-        case 16: snprintf(line, n, "%s Wipe all slots", cur); break;
+        case 15: snprintf(line, n, "%s SpkTrim %+dHz", cur, (int)c.speaker_rate_trim - 100); break;
+        case 16: snprintf(line, n, "%s Reset to defaults", cur); break;
+        case 17: snprintf(line, n, "%s Wipe all slots", cur); break;
     }
 }
 

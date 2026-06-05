@@ -54,6 +54,14 @@ struct __attribute__((packed)) Config_body {
     // preserves the original "any controller activity wakes the screen"
     // behavior. Issues #8 (dim timeout never fired during play) and #9.
     uint8_t controller_wakes_display;
+    // EXPERIMENTAL (audio/speaker-rate-trim branch): fine speaker clock-drift trim.
+    // The DS5's DAC and the USB host's audio clock are independent ~48 kHz crystals;
+    // the residual ppm mismatch slowly drifts the DS5's buffer and produces the
+    // periodic crackle (#7). This nudges our delivered rate to 48000 + (trim-100) Hz
+    // to null that drift. Stored 0..200, offset by 100 so an erased-flash 0xFF clamps
+    // to 100 = 0 Hz (an exact no-op, byte-identical to pre-trim). Swept on the OLED
+    // Settings screen with the D-pad ▶◀, 1 Hz/step. Default 100 (0 Hz).
+    uint8_t speaker_rate_trim;
 };
 
 struct __attribute__((packed)) Config {

@@ -121,6 +121,10 @@ void config_valid() {
         body->controller_wakes_display = 1;
         printf("[Config] controller_wakes_display invalid, defaulting to 1 (on)\n");
     }
+    if (body->speaker_rate_trim > 200) {  // 0xFF erased / upgrade → 0 Hz (centered)
+        body->speaker_rate_trim = 100;    // 100 encodes 0 Hz; actual trim = stored - 100
+        printf("[Config] speaker_rate_trim invalid, defaulting to 100 (0 Hz)\n");
+    }
     if (body->config_version != CONFIG_VERSION) {
         body->config_version = CONFIG_VERSION;
         printf("[Config] Warning: Config may breaking change\n");

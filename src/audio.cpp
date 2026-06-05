@@ -264,12 +264,20 @@ void audio_loop() {
 
     static float audio_buf[480 * 2];
     static uint audio_buf_pos = 0;
+    static double spk_acc = 0.0;   // speaker rate-trim accumulator (persists across calls)
     // 2. 从4ch中提取ch3/ch4，转换为float输入重采样器
     WDL_ResampleSample *in_buf;
     int nframes = resampler.ResamplePrepare(frames, OUTPUT_CHANNELS, &in_buf);
 
     const float audio_gain = mute[0] ? 0.0f : powf(10.0f, get_config().speaker_volume / 20.0f);
     const float haptics_gain = get_config().haptics_gain;
+
+    // EXPERIMENTAL speaker clock-drift trim (audio/speaker-rate-trim). Deliver
+    // 48000 + trim samples/s to the DS5 instead of exactly 48000, to null the slow
+    // inter-crystal drift behind the crackle (#7). trim = 0 → ratio == 1.0 → exact
+    // no-op (byte-identical to pre-trim, since 48000/48000 is exact in double).
+    const int    spk_trim_hz = (int)get_config().speaker_rate_trim - 100; // -100..+100 Hz
+    const double spk_ratio   = (48000.0 + spk_trim_hz) / 48000.0;
     uint16_t spk_max = g_peak_spk;
     uint16_t hap_max = g_peak_hap;
 
@@ -308,19 +316,32 @@ void audio_loop() {
             if (b > hap_max) hap_max = b;
         }
  #if !DISABLE_SPEAKER_PROC
-        audio_buf[audio_buf_pos++] = raw[i * INPUT_CHANNELS] / 32768.0f * audio_gain;
-        audio_buf[audio_buf_pos++] = raw[i * INPUT_CHANNELS + 1] / 32768.0f * audio_gain;
-        if (audio_buf_pos == 480 * 2) {
-            static audio_raw_element element{};
-            memcpy(element.data, audio_buf, 480 * 2 * 4);
-            if (queue_is_full(&audio_fifo)) {
-                queue_try_remove(&audio_fifo,NULL);
-                g_fifo_drops++;
+        {
+            const float spk_l = raw[i * INPUT_CHANNELS]     / 32768.0f * audio_gain;
+            const float spk_r = raw[i * INPUT_CHANNELS + 1] / 32768.0f * audio_gain;
+            // Rate-trim: emit `spk_ratio` output samples per input sample on average
+            // (usually 1; occasionally 2 when trim>0, or 0 when trim<0). Zero-order
+            // hold — at ppm-scale trims a single duplicated/dropped sample is inaudible
+            // vs a full 480-sample buffer underrun.
+            spk_acc += spk_ratio;
+            int emit = (int)spk_acc;
+            spk_acc -= emit;
+            while (emit-- > 0) {
+                audio_buf[audio_buf_pos++] = spk_l;
+                audio_buf[audio_buf_pos++] = spk_r;
+                if (audio_buf_pos == 480 * 2) {
+                    static audio_raw_element element{};
+                    memcpy(element.data, audio_buf, 480 * 2 * 4);
+                    if (queue_is_full(&audio_fifo)) {
+                        queue_try_remove(&audio_fifo,NULL);
+                        g_fifo_drops++;
+                    }
+                    if (!queue_try_add(&audio_fifo, &element)) {
+                        printf("[Audio] Warning: audio_fifo add failed\n");
+                    }
+                    audio_buf_pos = 0;
+                }
             }
-            if (!queue_try_add(&audio_fifo, &element)) {
-                printf("[Audio] Warning: audio_fifo add failed\n");
-            }
-            audio_buf_pos = 0;
         }
 #endif
         float h_l = raw[i * INPUT_CHANNELS + 2] / 32768.0f * haptics_gain;
