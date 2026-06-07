@@ -257,15 +257,30 @@ uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t
     // only for the report DATA (reqlen = report_size - 1); usbhid prepends the
     // report-id byte itself. The two CRC'd reports validate crc32 over
     // [0xA3 feature-seed, report_id, data...] in the last 4 bytes.
-    if (report_id == 0x09) {                       // pairing info → controller MAC at [0..5]
+    // hid_playstation (kernel) AND the game's native DualSense detection both read
+    // 0x09 (pairing), 0x20 (firmware) and 0x05 (calibration). The KERNEL only checks
+    // size + crc, but the GAME validates the actual CONTENT — so synthesized zeros
+    // pass the kernel yet get rejected by the game (a ~156x GET retry storm, and no
+    // native adaptive triggers). Serve the REAL controller data, which init_feature()
+    // caches from the controller over BT (get_feature_data returns it incl. the
+    // report-id at [0]). Fall back to a crc-valid synthetic answer ONLY when the
+    // controller isn't linked yet (USB-enumeration probe before the BT link), so the
+    // kernel still binds at that moment.
+    if (report_id == 0x09 || report_id == 0x20 || report_id == 0x05) {
         if (reqlen == 0) return 0;
+        std::vector<uint8_t> real = get_feature_data(report_id, reqlen);
+        if (real.size() > 1) {                     // real cached response present
+            uint16_t n = (uint16_t)(real.size() - 1);
+            if (n > reqlen) n = reqlen;
+            memcpy(buffer, real.data() + 1, n);
+            return n;
+        }
         memset(buffer, 0, reqlen);
-        if (reqlen >= 6) bt_get_addr(buffer);
-        return reqlen;
-    }
-    if (report_id == 0x20 || report_id == 0x05) {  // firmware info / calibration (CRC-checked)
-        if (reqlen < 5) return 0;
-        memset(buffer, 0, reqlen);                 // zero payload; kernel validates size + CRC only
+        if (report_id == 0x09) {                   // not linked yet: MAC-only stub
+            if (reqlen >= 6) bt_get_addr(buffer);
+            return reqlen;
+        }
+        if (reqlen < 5) return 0;                  // 0x20 / 0x05 stub: zeros + valid crc32
         uint8_t tmp[2 + 64];
         tmp[0] = 0xA3; tmp[1] = report_id;
         memcpy(tmp + 2, buffer, reqlen - 4);
