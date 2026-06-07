@@ -251,6 +251,32 @@ uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t
     (void) buffer;
     (void) reqlen;
 
+    // --- DualSense feature reports that Linux's hid_playstation reads at probe ---
+    // Without valid answers the kernel never creates a gamepad device, so games
+    // outside Steam Input (Heroic/Proton/native) see no controller. The host asks
+    // only for the report DATA (reqlen = report_size - 1); usbhid prepends the
+    // report-id byte itself. The two CRC'd reports validate crc32 over
+    // [0xA3 feature-seed, report_id, data...] in the last 4 bytes.
+    if (report_id == 0x09) {                       // pairing info → controller MAC at [0..5]
+        if (reqlen == 0) return 0;
+        memset(buffer, 0, reqlen);
+        if (reqlen >= 6) bt_get_addr(buffer);
+        return reqlen;
+    }
+    if (report_id == 0x20 || report_id == 0x05) {  // firmware info / calibration (CRC-checked)
+        if (reqlen < 5) return 0;
+        memset(buffer, 0, reqlen);                 // zero payload; kernel validates size + CRC only
+        uint8_t tmp[2 + 64];
+        tmp[0] = 0xA3; tmp[1] = report_id;
+        memcpy(tmp + 2, buffer, reqlen - 4);
+        uint32_t crc = crc32_seeded(tmp, (size_t)(2 + (reqlen - 4)), 0);
+        buffer[reqlen - 4] = (uint8_t)(crc);
+        buffer[reqlen - 3] = (uint8_t)(crc >> 8);
+        buffer[reqlen - 2] = (uint8_t)(crc >> 16);
+        buffer[reqlen - 1] = (uint8_t)(crc >> 24);
+        return reqlen;
+    }
+
     if (is_pico_cmd(report_id)) {
         return pico_cmd_get(report_id, buffer, reqlen);
     }
