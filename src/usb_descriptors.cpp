@@ -372,7 +372,7 @@ uint8_t descriptor_configuration[] = {
     0x00, // bCountryCode: Not localized
     0x01, // bNumDescriptors: 1 report descriptor
     0x22, // bDescriptorType: Report
-    0x41, 0x01, // wDescriptorLength: 321 (0x0141) DS
+    0x21, 0x01, // wDescriptorLength: 289 (0x0121) DS  (F6-F9 removed to byte-match a real DS5)
     // 0xB5, 0x01, // wDescriptorLength: 437 (0x01B5) DSE
 
     // Endpoint Descriptor (HID IN: EP4)
@@ -418,7 +418,7 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
     descriptor_configuration[offset - 1] = bInterval;
     descriptor_configuration[offset - 8] = bInterval;
     if (ds_mode()) {
-        descriptor_configuration[offset - 16] = 0x41;
+        descriptor_configuration[offset - 16] = 0x21; // wDescriptorLength lo = 289 (0x0121); F6-F9 removed to byte-match a real DS5
     }else {
         descriptor_configuration[offset - 16] = 0xB5;
     }
@@ -571,26 +571,17 @@ uint8_t const desc_hid_report_ds[] = {
     0x09, 0x36, //   Usage (0x36)
     0x95, 0x03, //   Report Count (3)
     0xB1, 0x02, //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
-    0x85, 0xF6, //   Report ID (-10)
-    0x09, 0x37, //   Usage (Vendor 0x37)
-    0x95, 0x3F, //   Report Count (63)
-    0xB1, 0x02, //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
-    0x85, 0xF7, //   Report ID (-9)
-    0x09, 0x38, //   Usage (Vendor 0x38)
-    0x95, 0x3F, //   Report Count (63)
-    0xB1, 0x02, //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
-    0x85, 0xF8, //   Report ID (-8)
-    0x09, 0x39, //   Usage (Vendor 0x39)
-    0x95, 0x3F, //   Report Count (63)
-    0xB1, 0x02, //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
-    0x85, 0xF9, //   Report ID (-7)
-    0x09, 0x3A, //   Usage (Vendor 0x3A)
-    0x95, 0x3F, //   Report Count (63)
-    0xB1, 0x02, //   Feature (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
+    // NOTE: web-config feature reports 0xF6-0xF9 are intentionally NOT declared
+    // here. Declaring them made this descriptor 321 bytes vs a genuine DS5's 289,
+    // and games' native DualSense parser rejected the mismatch -> no adaptive
+    // triggers in-game (the long-standing "triggers only work in the OLED test"
+    // bug). The firmware still HANDLES 0xF6-0xF9 (src/cmd.cpp); on Linux they
+    // work fine undeclared over hidraw, exactly like 0xFD. Trade-off: the browser
+    // WebHID config tool can't reach them (OLED + hidraw config still work).
     0xC0, // End Collection
-    // 321 bytes
+    // 289 bytes — byte-identical to a real DualSense
 };
-static_assert(sizeof(desc_hid_report_ds) == 0x0141);
+static_assert(sizeof(desc_hid_report_ds) == 0x0121);
 
 uint8_t const desc_hid_report_dse[] = {
     0x05, 0x01, // Usage Page (Generic Desktop Ctrls)
