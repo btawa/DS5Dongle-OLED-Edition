@@ -82,16 +82,6 @@ void state_update(const uint8_t *data, const uint8_t size) {
 
     set_bit(state[0], 0, update.EnableRumbleEmulation);
     set_bit(state[0], 1, update.UseRumbleNotHaptics);
-    // Mirror the host's adaptive-trigger "apply" flags into the outgoing state.
-    // Without these, copy_if_allowed below writes the 11-byte FFB params into
-    // state[] but the DS5 receives them with AllowRight/LeftTriggerFFB cleared
-    // and discards them — so adaptive triggers were dead through the dongle on
-    // BOTH the standalone 0x31 path and the 0x36 audio fold, while direct USB
-    // (which carries the host's flags verbatim) worked. The on-device Trigger
-    // Test screen sets these same bits (0x0C) directly, which is why it worked.
-    // (issue #6)
-    set_bit(state[0], 2, update.AllowRightTriggerFFB);
-    set_bit(state[0], 3, update.AllowLeftTriggerFFB);
     set_bit(state[38], 2, update.EnableImprovedRumbleEmulation);
     copy_if_allowed(
         update.UseRumbleNotHaptics || update.EnableRumbleEmulation,
