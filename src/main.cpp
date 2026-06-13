@@ -95,7 +95,6 @@ uint8_t interrupt_in_data[63] = {
 };
 
 critical_section_t report_cs;
-volatile bool report_dirty = false;
 
 void interrupt_loop() {
     // OLED Edition: hold PS + Mute for 2 seconds to soft-reboot the dongle.
@@ -117,46 +116,19 @@ void interrupt_loop() {
 
     if (!tud_hid_ready()) return;
 
-    // TODO: Refactor for better code reuse
-    if (get_config().polling_rate_mode != 2) {
-        // Remap acts on the OUTGOING copy only — interrupt_in_data stays raw so
-        // the reboot combo above and every OLED screen keep seeing physical input.
-        uint8_t out[63];
+    // Remap acts on the OUTGOING copy only — interrupt_in_data stays raw so
+    // the reboot combo above and every OLED screen keep seeing physical input.
+    uint8_t out[63];
+    if (get_config().polling_rate_mode == 2) {
+        critical_section_enter_blocking(&report_cs);
         memcpy(out, interrupt_in_data, 63);
-        remap_apply(out);
-        if (!tud_hid_report(0x01, out, 63)) {
-            printf("[USBHID] tud_hid_report error\n");
-        }
-        return;
+        critical_section_exit(&report_cs);
+    } else {
+        memcpy(out, interrupt_in_data, 63);
     }
-
-    bool should_send = false;
-    // Local buffer to hold the report data while we prepare it to send. 
-    uint8_t safe_report[63];
-
-
-    critical_section_enter_blocking(&report_cs);
-    if (report_dirty) {
-        memcpy(safe_report, interrupt_in_data, 63);
-        report_dirty = false;
-        should_send = true;
-    }
-    critical_section_exit(&report_cs);
-
-    // Remap the snapshot, not interrupt_in_data (outgoing copy only — see above).
-    if (should_send) remap_apply(safe_report);
-
-    // Only send to TinyUSB if we actually grabbed fresh data
-    if (should_send) {
-        if (!tud_hid_report(0x01, safe_report, 63)) {
-            printf("[USBHID] tud_hid_report error\n");
-
-            // If the report failed to queue, restore the dirty flag 
-            // so we try again on the next loop iteration.
-            critical_section_enter_blocking(&report_cs);
-            report_dirty = true;
-            critical_section_exit(&report_cs);
-        }
+    remap_apply(out);
+    if (!tud_hid_report(0x01, out, 63)) {
+        printf("[USBHID] tud_hid_report error\n");
     }
 }
 
@@ -232,7 +204,6 @@ void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
 
         critical_section_enter_blocking(&report_cs);
         memcpy(interrupt_in_data, data + 3, 63);
-        report_dirty = true;
         critical_section_exit(&report_cs);
 #if ENABLE_BATT_LED
         battery_led_note_report();
